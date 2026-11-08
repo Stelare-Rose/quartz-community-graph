@@ -130,12 +130,28 @@ import {
       var links = [];
       var allTags = [];
       var validLinks = new Set(data.keys());
+      var ghosts = new Set();
+      var showGhosts = config.showGhosts !== false;
+
+      function ghostLabel(s) {
+        var last = s.split("/").pop() || s;
+        return last.replace(/-/g, " ");
+      }
 
       data.forEach(function (details, source) {
         var outgoing = details.links || [];
         for (var i = 0; i < outgoing.length; i++) {
           var dest = simplifySlug(outgoing[i]);
           if (validLinks.has(dest)) {
+            links.push({ source: source, target: dest });
+          } else if (
+            showGhosts &&
+            dest &&
+            dest !== source &&
+            !dest.startsWith("tags/") &&
+            !/\.[a-z0-9]{1,5}$/i.test(dest)
+          ) {
+            ghosts.add(dest);
             links.push({ source: source, target: dest });
           }
         }
@@ -182,6 +198,9 @@ import {
         validLinks.forEach(function (id) {
           neighbourhood.add(id);
         });
+        ghosts.forEach(function (id) {
+          neighbourhood.add(id);
+        });
         for (var i = 0; i < allTags.length; i++) {
           neighbourhood.add(allTags[i]);
         }
@@ -191,7 +210,11 @@ import {
       var nodeMap = new Map();
       neighbourhood.forEach(function (url) {
         var isTag = url.startsWith("tags/");
-        var text = isTag ? "#" + url.substring(5) : data.get(url)?.title || url;
+        var text = isTag
+          ? "#" + url.substring(5)
+          : ghosts.has(url)
+            ? ghostLabel(url)
+            : data.get(url)?.title || url;
         var nodeTags = isTag ? [] : data.get(url)?.tags || [];
         var node = {
           id: url,
@@ -390,6 +413,7 @@ import {
         var node = nodes[i];
         var nodeId = node.id;
         var isTagNode = nodeId.startsWith("tags/");
+        var isGhostNode = ghosts.has(nodeId);
         var radius = nodeRadius(node);
         var color = nodeColor(node);
 
@@ -409,13 +433,15 @@ import {
 
         var gfx = new PIXI.Graphics();
         gfx.circle(0, 0, radius);
-        gfx.fill({ color: isTagNode ? light : color });
+        gfx.fill({ color: isTagNode || isGhostNode ? light : color });
         if (isTagNode) {
           gfx.stroke({ width: 2, color: tertiary });
+        } else if (isGhostNode) {
+          gfx.stroke({ width: 1.5, color: gray });
         }
 
         gfx.eventMode = "static";
-        gfx.cursor = "pointer";
+        gfx.cursor = isGhostNode ? "default" : "pointer";
         gfx.label = nodeId;
 
         (function (n, g, labelRef) {
@@ -512,7 +538,7 @@ import {
           updateHoverInfo(null);
           renderPixiFromD3();
 
-          if (Date.now() - dragStartTime < 500) {
+          if (Date.now() - dragStartTime < 500 && !ghosts.has(event.subject.id)) {
             var target = resolveBasePath(event.subject.id);
             window.location.href = target;
           }
@@ -531,6 +557,7 @@ import {
         for (var i = 0; i < nodeRenderData.length; i++) {
           (function (nodeData) {
             nodeData.gfx.on("click", function () {
+              if (ghosts.has(nodeData.simulationData.id)) return;
               var target = resolveBasePath(nodeData.simulationData.id);
               window.location.href = target;
             });
